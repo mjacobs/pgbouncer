@@ -764,6 +764,11 @@ extern int cf_listen_port;
 extern int cf_listen_backlog;
 extern int cf_peer_id;
 
+extern int cf_admin_port;
+
+/* Global variable to store the admin socket file descriptor */
+extern int cf_admin_sock;
+
 extern int cf_pool_mode;
 extern int cf_max_client_conn;
 extern int cf_default_pool_size;

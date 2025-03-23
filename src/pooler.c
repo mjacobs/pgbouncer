@@ -89,7 +89,7 @@ void cleanup_sockets(void)
 /*
  * initialize another listening socket.
  */
-static bool add_listen(int af, const struct sockaddr *sa, int salen)
+static bool add_listen(int af, const struct sockaddr *sa, int salen, bool isAdmin)
 {
 	struct ListenSocket *ls;
 	int sock, res;
@@ -133,7 +133,7 @@ static bool add_listen(int af, const struct sockaddr *sa, int salen)
 	 * the socket option in that case, but this area is fairly
 	 * unportable, so perhaps better to avoid it.)
 	 */
-	if (af != AF_UNIX && cf_so_reuseport) {
+	if (af != AF_UNIX && cf_so_reuseport && !isAdmin) {
 #if defined(SO_REUSEPORT_LB)
 		int val = 1;
 		errpos = "setsockopt/SO_REUSEPORT_LB";
@@ -194,6 +194,10 @@ static bool add_listen(int af, const struct sockaddr *sa, int salen)
 
 	log_info("listening on %s", sa2str(sa, buf, sizeof(buf)));
 	statlist_append(&sock_list, &ls->node);
++	if (isAdmin) {
++		extern int cf_admin_sock;
++		cf_admin_sock = sock;
++	}
 	return true;
 
 failed:

@@ -92,6 +92,11 @@ int cf_unix_socket_mode;
 char *cf_unix_socket_group;
 int cf_peer_id;
 
+/* Global variable to store the admin socket file descriptor */
+int cf_admin_sock = -1;
+
+int cf_admin_port;
+
 int cf_pool_mode = POOL_SESSION;
 
 /* sbuf config */
@@ -274,6 +279,7 @@ static const struct CfKey bouncer_params [] = {
 	CF_ABS("listen_addr", CF_STR, cf_listen_addr, CF_NO_RELOAD, ""),
 	CF_ABS("listen_backlog", CF_INT, cf_listen_backlog, CF_NO_RELOAD, "128"),
 	CF_ABS("listen_port", CF_INT, cf_listen_port, CF_NO_RELOAD, "6432"),
+	CF_ABS("admin_port", CF_INT, cf_admin_port, CF_NO_RELOAD, "6433"),
 	CF_ABS("log_connections", CF_INT, cf_log_connections, 0, "1"),
 	CF_ABS("log_disconnections", CF_INT, cf_log_disconnections, 0, "1"),
 	CF_ABS("log_pooler_errors", CF_INT, cf_log_pooler_errors, 0, "1"),
@@ -1134,6 +1140,29 @@ int main(int argc, char *argv[])
 		 event_get_version(), event_base_get_method(pgb_event_base), adns_get_backend(),
 		 tls_backend_version());
 
+	/* setup admin listener */
+	if (!did_takeover) {
+		if (cf_admin_port > 0) {
+			PgAddr addr;
+			// Assuming IPv4 for simplicity, needs to handle IPv6 as well
+			if (pga_pton(&addr, cf_listen_addr, cf_admin_port) == false) {
+				log_warning("could not parse admin listen address '%s'", cf_listen_addr);
+				// Fallback to IPv4 if parsing fails
+				pga_set(&addr, AF_INET, cf_admin_port);
+			}
+			int admin_fd = socket(addr.sa.sa_family, SOCK_STREAM, 0);
+			if (admin_fd < 0)
+				die("socket() failed for admin port: %s", strerror(errno));
+			if (bind(admin_fd, &addr.sa, pga_socklen(&addr)) < 0)
+				die("bind() failed for admin port %d: %s", cf_admin_port, strerror(errno));
+			if (listen(admin_fd, cf_listen_backlog) < 0)
+				die("listen() failed for admin port: %s", strerror(errno));
+			if (!pooler_add_listener(admin_fd, &addr, false))
+				die("pooler_add_listener() failed for admin port");
+			log_info("listening on admin port %d", cf_admin_port);
+		}
+	}
+
 	sd_notify(0, "READY=1");
 
 	/* main loop */
@@ -1141,4 +1170,14 @@ int main(int argc, char *argv[])
 		main_loop_once();
 
 	return 0;
+}
+
+static socklen_t pga_socklen(const PgAddr *addr) {
+	if (addr->sa.sa_family == AF_INET) {
+		return sizeof(struct sockaddr_in);
+	} else if (addr->sa.sa_family == AF_INET6) {
+		return sizeof(struct sockaddr_in6);
+	} else {
+		return sizeof(struct sockaddr); // Or handle error as appropriate
+	}
 }
